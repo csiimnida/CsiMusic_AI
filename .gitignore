@@ -1,0 +1,22 @@
+# 비밀값 — 절대 커밋 금지
+.env
+*.key
+*.pem
+credentials*
+
+# .NET 빌드 산출물
+bin/
+obj/
+*.user
+
+# 데이터 · 캐시 · 로그
+data/
+cache/
+logs/
+*.db
+*.db-wal
+*.db-shm
+
+# OS
+.DS_Store
+Thumbs.db

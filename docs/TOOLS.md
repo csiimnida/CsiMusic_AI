@@ -52,12 +52,12 @@ API 키가 없어도 등록은 한다. 조건부로 등록하면 `LyricsService`
 
 ## 2. 도구 선택 로직 — `FetchExternalAsync`
 
-→ [`src/CsiMusic.Web/Services/LyricsService.cs`](../src/CsiMusic.Web/Services/LyricsService.cs) **119줄**
+→ [`src/CsiMusic.Web/Services/LyricsService.cs`](../src/CsiMusic.Web/Services/LyricsService.cs) **116줄**
 
 ```csharp
 private async Task<(string? Synced, string? Plain, string Source)> FetchExternalAsync(
     string videoId, string title, string? uploader, int duration, MusicMeta? music,
-    CancellationToken ct, bool includeInternet = true)
+    CancellationToken ct)
 {
     // (A) 곡당 한 번만 묻는다. 소스마다 부르면 같은 답에 API 를 여러 번 쓴다.
     var hint = await aiTitles.ParseAsync(title, uploader, duration, music, ct);
@@ -92,8 +92,7 @@ private async Task<(string? Synced, string? Plain, string Source)> FetchExternal
     }
 
     // ── 3단: Unison 플레인 / 4단: LRCLIB 플레인 ────────────────────
-    // ── 5단: 인터넷 폴백 (NetEase / Bugs / lyrics.ovh) ─────────────
-    // ── 6단: 나무위키 — 검증 통과 없이는 절대 채택하지 않는다 ─────────
+    // ── 5단: 나무위키 — 검증 통과 없이는 절대 채택하지 않는다 ─────────
 
     return (null, null, "none");
 }
@@ -103,8 +102,8 @@ private async Task<(string? Synced, string? Plain, string Source)> FetchExternal
 
 #### ① 힌트를 공유한다 — 도구 A 는 곡당 딱 1회
 
-AI 제목 파싱을 소스마다 부르면 **똑같은 답에 API 를 6번 쓴다.**
-한 번 부른 결과(`hint`)를 6개 소스가 전부 인자로 받아 쓴다.
+AI 제목 파싱을 소스마다 부르면 **똑같은 답에 API 를 여러 번 쓴다.**
+한 번 부른 결과(`hint`)를 모든 소스가 인자로 받아 쓴다.
 
 #### ② 검증에 예산을 둔다 — 곡당 2회
 
@@ -155,8 +154,7 @@ Unison 의 videoId 정확매칭은 **그 영상에 직접 달린 가사**라 "�
 | 2 | LRCLIB 싱크 | 제목/아티스트 퍼지 매칭이지만 **커버리지가 넓다** |
 | 3 | Unison 플레인 | 싱크가 없을 때. LRCLIB 플레인보다 **매칭이 정확하다** |
 | 4 | LRCLIB 플레인 | |
-| 5 | NetEase / Bugs / lyrics.ovh | 한국 인디·커버·아시아권 보완. **곡당 HTTP 왕복이 여러 번**이라 재생 경로에서만 쓰고 배치에선 뺀다 |
-| 6 | 나무위키 | 보컬로이드·합성엔진 곡은 위 전부에 없는데 여기엔 실려 있는 경우가 흔하다 |
+| 5 | 나무위키 | 보컬로이드·합성엔진 곡은 위 전부에 없는데 여기엔 실려 있는 경우가 흔하다 |
 
 싱크(줄별 시각)가 있는 가사가 플레인보다 항상 낫기 때문에, **같은 소스라도 싱크를 먼저 시도하고
 플레인은 뒤로 미룬다.** 그래서 Unison→LRCLIB→Unison→LRCLIB 로 번갈아 나온다.
@@ -286,7 +284,7 @@ AI 가 생성한다. 베껴 오는 건 생성보다 안전하다 — 정답이 �
 |---|---|
 | `AI 제목 파싱: … → … / … (cover=, conf=)` | 도구 A 가 원곡을 특정했다 |
 | `AI 가사 거부 [소스] … — 사유 (conf=)` | 도구 B 가 거부 → 다음 단으로 내려간다 |
-| `나무위키 가사 채택: 문서명 — N줄` | 6단까지 내려가 채택 |
+| `나무위키 가사 채택: 문서명 — N줄` | 5단까지 내려가 채택 |
 | `나무위키 가사 거부: 문서명 — 사유` | 검증 실패 → 가사 없음 |
 | `AI 가사 {층} 결과를 버린다 — 사유` | 도구 C 의 기계 검증 불합격 |
 | `AI 호출을 300초 동안 중단한다(연속 실패 N회)` | 회로 차단기 작동 |

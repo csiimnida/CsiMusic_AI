@@ -1,6 +1,6 @@
 # 가사를 대신 찾아 주는 AI 에이전트
 
-> 유튜브 영상 하나를 입력하면, 에이전트가 **9개의 도구를 스스로 골라 가며** 그 곡의 진짜 가사를 찾아내고,
+> 유튜브 영상 하나를 입력하면, 에이전트가 **8개의 도구를 스스로 골라 가며** 그 곡의 진짜 가사를 찾아내고,
 > 일본어 곡이면 **한글 발음과 한국어 번역**까지 줄 단위로 붙여 돌려준다. 사람은 재생 버튼만 누른다.
 
 **수행평가 4 대체 — AI 에이전트 서버 프로젝트 (자유 주제)** 제출물
@@ -13,7 +13,7 @@
 
 이 저장소는 **에이전트의 코드와 문서만 정리한 것**이다.
 
-- **`src/` 의 코드는 원본 경로 그대로 복사한 것이다.** 문서에 적힌 파일·줄번호가 그대로 맞는다.
+- **`src/` 의 코드는 원본과 같은 경로 구조로 정리했다.** 문서에 적힌 파일·줄번호는 이 저장소 기준이다.
 - **이 저장소만으로는 빌드되지 않는다.** 더 큰 개인 프로젝트의 일부라, 인증·재생 등
   AI 와 무관한 코드를 뺐기 때문이다.
   **코드를 *읽기* 위한 저장소**이지 실행하기 위한 저장소가 아니다.
@@ -58,13 +58,12 @@ Ditto - NewJeans
         └───────────┬───────────────┘
                     ▼
    ┌────────────────────────────────────────────────┐
-   │            도구 선택 사다리 (6단)                 │
+   │            도구 선택 사다리 (5단)                 │
    │  1) Unison 싱크    videoId 정확매칭 · 단어 타이밍  │
    │  2) LRCLIB 싱크    제목/아티스트 퍼지매칭         │
    │  3) Unison 플레인                              │
    │  4) LRCLIB 플레인                              │
-   │  5) 인터넷 폴백    NetEase / Bugs / lyrics.ovh   │
-   │  6) 나무위키       최후 수단 · 검증 없이는 불채택   │
+   │  5) 나무위키       최후 수단 · 검증 없이는 불채택   │
    └───────────┬────────────────────────────────────┘
                │  각 단의 결과를 채택하기 직전에 ↓
                ▼
@@ -97,8 +96,7 @@ Ditto - NewJeans
 | C | **발음·번역 생성** | 일본어 가사에 한글 음차 + 한국어 번역 | [`Services/Ai/AiLyricsLayers.cs`](src/CsiMusic.Web/Services/Ai/AiLyricsLayers.cs) |
 | 1 | Unison | videoId 정확매칭 · 단어 단위 타이밍 | [`Services/LyricsService.Unison.cs`](src/CsiMusic.Web/Services/LyricsService.Unison.cs) |
 | 2 | LRCLIB | 제목/아티스트 퍼지매칭 · 커버리지 넓음 | [`Services/LyricsService.cs`](src/CsiMusic.Web/Services/LyricsService.cs) |
-| 3 | NetEase / Bugs / lyrics.ovh | 아시아권·한국 인디 보완 | 〃 |
-| 4 | 나무위키 | 보컬로이드·동인곡 최후 수단 | [`Services/NamuLyricsSource.cs`](src/CsiMusic.Web/Services/NamuLyricsSource.cs) |
+| 3 | 나무위키 | 보컬로이드·동인곡 최후 수단 | [`Services/NamuLyricsSource.cs`](src/CsiMusic.Web/Services/NamuLyricsSource.cs) |
 | — | 규칙 기반 제목 파서 | 정규식 15개 — **AI 가 죽으면 여기로 폴백** | [`Services/TitleParser.cs`](src/CsiMusic.Web/Services/TitleParser.cs) |
 | — | 일본어 판별 | 유니코드 범위만 보는 순수 함수 — **AI 에 묻지 않는다** | [`Common/JapaneseText.cs`](src/CsiMusic.Web/Common/JapaneseText.cs) |
 
@@ -213,7 +211,7 @@ NAMU_LAYERS_ENABLED=true    # 도구 C 의 1순위(사람이 쓴 발음·번역)
 
 - **C# / .NET 8** (ASP.NET Core) · **SQLite** (Dapper) — 캐시·가사 저장
 - **Google Gemini API** (`gemini-3.5-flash-lite`) — 도구 A·B·C
-- 외부 가사 소스: LRCLIB · Unison · NetEase · Bugs · lyrics.ovh · 나무위키
+- 외부 가사 소스: Unison · LRCLIB · 나무위키
 - 배포: Docker Compose on **라즈베리파이 5**, Cloudflare Tunnel (HTTPS)
 
 ---

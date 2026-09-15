@@ -10,7 +10,7 @@ namespace CsiMusic.Web.Controllers;
 
 /// <summary>
 /// 가사 라우트 — Python routes/lyrics.py 대응. player-config + LRCLIB 조회/캐시 + 오프셋 저장.
-/// (자체 싱크/관리자 수동편집·NetEase 폴백은 후속.)
+/// (자체 싱크/관리자 수동편집은 후속.)
 /// </summary>
 [ApiController]
 [Route("api")]

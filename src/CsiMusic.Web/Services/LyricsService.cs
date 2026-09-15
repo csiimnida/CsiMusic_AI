@@ -13,7 +13,6 @@ namespace CsiMusic.Web.Services;
 /// 가사 조회 — LRCLIB(무료·키 불필요)에서 싱크(LRC)/플레인 가사를 가져와 lyrics 테이블에 캐시한다.
 /// Python services/lyrics.py 의 LRCLIB 경로 포팅. 부정결과도 캐시(NEGATIVE_TTL)하고, 곡 언어와
 /// 충돌하는 캐시는 자동 폐기·재조회(언어 가드)한다.
-/// (첫 컷: 커버 설명란 원곡추출·NetEase/Bugs 폴백은 후속 — selfsync/yt-dlp 의존이라 Phase E 와 함께.)
 /// </summary>
 public sealed partial class LyricsService(
     HttpClient http, ISqliteConnectionFactory factory, ILogger<LyricsService> log,
@@ -26,7 +25,7 @@ public sealed partial class LyricsService(
 
     // 언어 자동치유를 적용할(외부 자동매칭) 소스. 수동/자체싱크는 보존.
     private static readonly HashSet<string> LangHealSources = new(StringComparer.Ordinal)
-        { "lrclib", "description", "netease", "bugs", "internet", "lyricsovh" };
+        { "lrclib", "description" };
 
     public sealed record Result(string VideoId, string? Synced, string? Plain, string Source,
         int OffsetMs, bool Locked, object? Layers, string Status);
@@ -106,10 +105,8 @@ public sealed partial class LyricsService(
     ///   2) LRCLIB 싱크   — 제목/아티스트 퍼지 매칭이지만 커버리지가 넓다
     ///   3) Unison 플레인 — 싱크가 없을 때. LRCLIB 플레인보다 매칭이 정확하다
     ///   4) LRCLIB 플레인
-    ///   5) 인터넷 폴백(NetEase 싱크 / Bugs·lyrics.ovh 플레인) — 한국 인디/커버/아시아권 곡 보완
     ///
     /// 모두 best-effort(실패·차단 시 무해). 빈 결과도 호출측이 부정캐시로 남겨 반복 조회를 막는다.
-    /// (5) 는 곡당 HTTP 왕복이 여러 번이라 재생 요청 경로에서만 쓰고, 배치는 includeInternet=false 로 뺀다.
     ///
     /// AI 보조(켜져 있을 때)가 두 군데 붙는다 — 둘 다 없어도 동작은 이 아래 그대로다:
     ///   (A) 곡당 한 번 제목을 파싱해 곡名·아티스트 힌트를 만들고, 세 소스가 그 힌트를 공유한다.
@@ -117,8 +114,7 @@ public sealed partial class LyricsService(
     ///       즉 검증은 실패를 만드는 게 아니라 더 나은 후보를 찾을 기회를 만든다.
     /// </summary>
     private async Task<(string? Synced, string? Plain, string Source)> FetchExternalAsync(
-        string videoId, string title, string? uploader, int duration, MusicMeta? music, CancellationToken ct,
-        bool includeInternet = true)
+        string videoId, string title, string? uploader, int duration, MusicMeta? music, CancellationToken ct)
     {
         // (A) 곡당 한 번만 묻는다. 소스마다 부르면 같은 답에 API 를 세 번 쓴다.
         var hint = await aiTitles.ParseAsync(title, uploader, duration, music, ct);
@@ -168,15 +164,6 @@ public sealed partial class LyricsService(
         if (!lrclibRejected && Empty(lrclib?.PlainLyrics) is { } lp
             && await Ok("lrclib", lrclib!.TrackName, lrclib.ArtistName, lrclib.Duration, lp))
             return (null, lp, "lrclib");
-
-        if (includeInternet)
-        {
-            var net = await FetchInternetAsync(title, uploader, duration, music, hint, ct);
-            // NetEase/Bugs/lyrics.ovh 는 곡 메타를 안 돌려주므로 가사 본문만으로 판정한다.
-            if (net is not null && (net.Synced ?? net.Plain) is { } text
-                && await Ok(net.Source, null, null, null, text))
-                return (net.Synced, net.Plain, net.Source);
-        }
 
         // 마지막 수단 — 나무위키(계획 §9.6). 보컬로이드·합성엔진 곡은 LRCLIB·Unison 에 없는데
         // 나무위키에는 실려 있는 경우가 흔하다. 여기까지 왔다는 건 다른 소스가 전부 빈손이라는 뜻이다.
@@ -240,9 +227,9 @@ public sealed partial class LyricsService(
             }
         }
 
-        // 배치는 Unison(videoId 정확매칭) → LRCLIB 까지만. 인터넷 폴백은 곡당 왕복이 많아 제외한다.
+        // 배치는 Unison(videoId 정확매칭) → LRCLIB 까지만.
         var (newSynced, newPlain, newSource) =
-            await FetchExternalAsync(videoId, title, uploader, duration, music, ct, includeInternet: false);
+            await FetchExternalAsync(videoId, title, uploader, duration, music, ct);
         ct.ThrowIfCancellationRequested();
         return (Classify(newSynced, newPlain), newSource,
             new PendingLyricWrite(videoId, newSynced, newPlain, newSource));
@@ -387,203 +374,16 @@ public sealed partial class LyricsService(
         }
     }
 
-    // ---------- 인터넷 가사 폴백 (NetEase 싱크 / Bugs·lyrics.ovh 플레인) ----------
-    // Python selfsync.py 의 fetch_internet_lyrics 포팅. LRCLIB 공백을 메운다(특히 한국 인디/커버).
-    // 모두 best-effort: 어떤 실패·차단이든 null 로 조용히 떨어진다(앱에 무해). 모든 소스에 언어(문자체계)
-    // 가드를 적용해 틀린 언어 매칭(일본곡에 프랑스어 가사 등)을 막는다.
+    // ---------- 외부 소스 공용 ----------
 
-    public sealed record InternetLyric(string? Synced, string? Plain, string Source);
-
-    private async Task<InternetLyric?> FetchInternetAsync(
-        string title, string? uploader, int duration, MusicMeta? music,
-        AiTitleParser.AiTitle? hint, CancellationToken ct)
-    {
-        var (tracks, artists) = Candidates(title, uploader, music, hint);
-        if (tracks.Count == 0) return null;
-        var track0 = tracks[0];
-        // 곡名처럼 보이는 후보는 걸러 진짜 아티스트를 고른다(artists[0] 는 흔히 곡名이라 부정확).
-        var artistCands = MatchArtistCandidates(artists, tracks);
-        var artist0 = artistCands.Count > 0 ? artistCands[0] : "";
-        var langRef = LanguageRef(tracks, title);
-
-        // NetEase 검색 쿼리 후보(중복 제거, 최대 3 — 각 검색이 8개 결과라 대개 한 번이면 충분).
-        var queries = new List<string>();
-        foreach (var raw in new[] { $"{track0} {artist0}", track0, tracks.Count > 1 ? $"{tracks[1]} {artist0}" : "" })
-        {
-            var q = raw.Trim();
-            if (q.Length > 0 && !queries.Contains(q)) queries.Add(q);
-        }
-
-        string? plainHit = null;
-        foreach (var q in queries.Take(3))
-        {
-            var ne = await FetchNeteaseAsync(q, duration, track0, artist0, ct);
-            if (ne?.Synced is { } s && LyricsLanguageOk(langRef, s)) return new InternetLyric(s, null, "netease");
-            if (plainHit is null && ne?.Plain is { } p && LyricsLanguageOk(langRef, p)) plainHit = p;
-        }
-        if (plainHit is not null) return new InternetLyric(null, plainHit, "netease");
-
-        // Bugs — 한국 vtuber/인디 등 NetEase·LRCLIB 공백 보완(원곡 언어 그대로).
-        var bugs = await FetchBugsAsync(track0, artist0, ct);
-        if (bugs is not null && LyricsLanguageOk(langRef, bugs)) return new InternetLyric(null, bugs, "bugs");
-
-        // lyrics.ovh — 1회만(영미권 plain).
-        if (artist0.Length > 0)
-        {
-            var ovh = await FetchLyricsOvhAsync(artist0, track0, ct);
-            if (ovh is not null && LyricsLanguageOk(langRef, ovh)) return new InternetLyric(null, ovh, "lyricsovh");
-        }
-        return null;
-    }
-
-    // ----- NetEase(music.163.com) — 무키. 아시아권 커버리지 좋고 사람이 만든 싱크 LRC 를 준다. -----
-    private static readonly (string Key, string Value)[] NeteaseHeaders =
-        { ("Referer", "https://music.163.com/"), ("Cookie", "appver=2.0.2") };
-
-    private sealed record NeteaseLyric(string? Synced, string? Plain);
-
-    private async Task<NeteaseLyric?> FetchNeteaseAsync(string query, int duration, string track, string artist, CancellationToken ct)
-    {
-        // GET /search/get/web 는 근래 암호화 응답을 주므로 평문 JSON 을 주는 POST /search/get 사용.
-        using var form = new FormUrlEncodedContent(new Dictionary<string, string>
-            { ["s"] = query, ["type"] = "1", ["offset"] = "0", ["total"] = "true", ["limit"] = "8" });
-        var searchJson = await HttpTextAsync("https://music.163.com/api/search/get", NeteaseHeaders, form, ct);
-        if (searchJson is null) return null;
-
-        long? bestId = null;
-        (double, double, double) bestKey = default;
-        var have = false;
-        try
-        {
-            using var doc = JsonDocument.Parse(searchJson);
-            if (!doc.RootElement.TryGetProperty("result", out var result)
-                || !result.TryGetProperty("songs", out var songs) || songs.ValueKind != JsonValueKind.Array)
-                return null;
-            foreach (var s in songs.EnumerateArray())
-            {
-                var name = s.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                var durS = s.TryGetProperty("duration", out var d) && d.TryGetInt64(out var dm) ? dm / 1000.0 : 0;
-                var diff = duration > 0 ? Math.Abs(durS - duration) : 0;
-                var sim = track.Length > 0 ? Similar(name, track) : 0.5;
-                if (duration > 0 && diff > 15) continue;                 // 길이 15초 초과로 빗나감
-                if (track.Length > 0 && sim < 0.45) continue;            // 곡名 유사도 매우 낮음
-                var asim = artist.Length > 0 ? NeteaseArtistSim(s, artist) : 0.5;
-                if (artist.Length > 0 && asim < 0.3) continue;           // 아티스트 힌트와 전혀 안 맞음(동명 타곡)
-                var key = (Math.Round(sim, 1), Math.Round(asim, 1), -diff);  // 곡名 → 아티스트 → 길이 근접
-                if ((!have || Comparer<(double, double, double)>.Default.Compare(key, bestKey) > 0)
-                    && s.TryGetProperty("id", out var idEl) && idEl.TryGetInt64(out var idv))
-                { bestKey = key; have = true; bestId = idv; }
-            }
-        }
-        catch (JsonException) { return null; }
-        if (bestId is null) return null;
-
-        var lyricJson = await HttpTextAsync(
-            $"https://music.163.com/api/song/lyric?os=pc&id={bestId}&lv=-1&kv=-1&tv=-1", NeteaseHeaders, null, ct);
-        if (lyricJson is null) return null;
-        string rawLrc;
-        try
-        {
-            using var doc = JsonDocument.Parse(lyricJson);
-            rawLrc = doc.RootElement.TryGetProperty("lrc", out var lrc) && lrc.TryGetProperty("lyric", out var ly)
-                ? ly.GetString() ?? "" : "";
-        }
-        catch (JsonException) { return null; }
-
-        var text = StripCredits(rawLrc.Trim());
-        if (text.Length == 0) return null;
-        // 타임태그가 충분하면 synced, 아니면 plain.
-        return LrcTagRe().Matches(text).Count >= 4 ? new NeteaseLyric(text, null) : new NeteaseLyric(null, CleanPlain(text));
-    }
-
-    private static double NeteaseArtistSim(JsonElement song, string artist)
-    {
-        if (!song.TryGetProperty("artists", out var arts) || arts.ValueKind != JsonValueKind.Array) return 0;
-        double max = 0;
-        foreach (var a in arts.EnumerateArray())
-            if (a.TryGetProperty("name", out var nm)) max = Math.Max(max, Similar(nm.GetString() ?? "", artist));
-        return max;
-    }
-
-    // 가사 줄만 남기고 크레딧 메타 줄(작곡:…, produced by …)을 제거(NetEase LRC 머리에 흔함).
-    private static string StripCredits(string lrc)
-    {
-        var kept = new List<string>();
-        foreach (var raw in lrc.Split('\n'))
-        {
-            var text = LrcTagRe().Replace(raw, "").Trim();
-            if (text.Length > 0 && CreditRe().IsMatch(text) && (text.Contains(':') || text.Contains('：'))) continue;
-            kept.Add(raw);
-        }
-        return string.Join("\n", kept).Trim();
-    }
-
-    // ----- Bugs(music.bugs.co.kr) — 비로그인 트랙 페이지 HTML 의 <xmp> 가사를 긁는다(플레인). -----
-    private static readonly (string Key, string Value)[] BugsHeaders =
-    {
-        ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"),
-        ("Referer", "https://music.bugs.co.kr/"),
-    };
-
-    private async Task<string?> FetchBugsAsync(string track, string artist, CancellationToken ct)
-    {
-        track = (track ?? "").Trim();
-        if (track.Length == 0) return null;
-        var tid = await BugsSearchIdAsync($"{track} {artist}".Trim(), ct) ?? await BugsSearchIdAsync(track, ct);
-        if (tid is null) return null;
-        var page = await HttpTextAsync($"https://music.bugs.co.kr/track/{tid}", BugsHeaders, null, ct);
-        if (page is null) return null;
-
-        // 제목 유사도 가드 — 검색 1위가 엉뚱한 곡이면 버린다.
-        var og = BugsOgTitleRe().Match(page);
-        if (og.Success)
-        {
-            var ptitle = System.Net.WebUtility.HtmlDecode(og.Groups[1].Value);
-            if (Similar(ptitle, track) < 0.4 && !ptitle.Contains(track, StringComparison.OrdinalIgnoreCase)) return null;
-        }
-
-        var m = BugsLyricsRe().Match(page);
-        if (!m.Success) m = BugsXmpRe().Match(page);
-        if (!m.Success) return null;
-        var text = System.Net.WebUtility.HtmlDecode(BrRe().Replace(m.Groups[1].Value, "\n")).Trim();
-        if (text.Split('\n').Length < 4) return null;   // 너무 짧으면 가사 아님(메타/오추출)
-        return CleanPlain(text);
-    }
-
-    private async Task<string?> BugsSearchIdAsync(string query, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(query)) return null;
-        var html = await HttpTextAsync(
-            "https://music.bugs.co.kr/search/track?q=" + Uri.EscapeDataString(query), BugsHeaders, null, ct);
-        if (html is null) return null;
-        var m = BugsTrackRe().Match(html);
-        return m.Success ? m.Groups[1].Value : null;
-    }
-
-    // ----- lyrics.ovh — 키 불필요, 주로 영미권 plain. -----
-    private async Task<string?> FetchLyricsOvhAsync(string artist, string track, CancellationToken ct)
-    {
-        if (artist.Length == 0 || track.Length == 0) return null;
-        var json = await HttpTextAsync(
-            $"https://api.lyrics.ovh/v1/{Uri.EscapeDataString(artist)}/{Uri.EscapeDataString(track)}", null, null, ct);
-        if (json is null) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.TryGetProperty("lyrics", out var l) ? CleanPlain(l.GetString() ?? "") : null;
-        }
-        catch (JsonException) { return null; }
-    }
-
+    /// <summary>플레인 가사 본문 정리 — 비어 있으면 null.</summary>
     private static string? CleanPlain(string? text)
     {
         text = (text ?? "").Trim();
-        if (text.Length == 0) return null;
-        text = OvhHeaderRe().Replace(text, "").Trim();   // lyrics.ovh 헤더 제거(타 소스엔 무해)
         return text.Length == 0 ? null : text;
     }
 
-    // GET/POST 로 원문 텍스트(JSON·HTML)를 받는다. 소스별 헤더(Referer/Cookie/UA)를 요청에 실어 보낸다.
+    /// <summary>GET/POST 로 원문 텍스트(JSON·XML)를 받는다. 비성공 응답·네트워크 실패는 전부 null.</summary>
     private async Task<string?> HttpTextAsync(
         string url, IReadOnlyList<(string Key, string Value)>? headers, HttpContent? body, CancellationToken ct)
     {
@@ -600,10 +400,11 @@ public sealed partial class LyricsService(
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or OperationCanceledException)
         {
-            log.LogDebug("internet lyric unreachable: {Msg}", e.Message);
+            log.LogDebug("외부 가사 소스 응답 없음: {Msg}", e.Message);
             return null;
         }
     }
+
 
     // ---------- 매칭 판정 (Python 대응) ----------
 
@@ -692,23 +493,9 @@ public sealed partial class LyricsService(
     // ---------- 제목 파싱 / 후보 추출 ----------
 
 
-    // 인터넷 폴백용. LRC 시간태그(synced 판정·크레딧 제거), NetEase 크레딧 줄, Bugs HTML 파싱.
+    // LRC 시간태그 — 싱크 판정과 태그 제거에 쓴다.
     [GeneratedRegex(@"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")]
     private static partial Regex LrcTagRe();
-    [GeneratedRegex(@"作词|作詞|作曲|编曲|編曲|制作|製作|出品|混音|母带|母帶|和声|和聲|录音|錄音|监制|監製|吉他|贝斯|键盘|弦乐|produced\s+by|composed\s+by|written\s+by|arranged\s+by|mixed\s+by|mastered\s+by|lyrics?\s*[:：]|작사|작곡|편곡|제작|믹싱|녹음|편곡자", RegexOptions.IgnoreCase)]
-    private static partial Regex CreditRe();
-    [GeneratedRegex(@"music\.bugs\.co\.kr/track/(\d+)")]
-    private static partial Regex BugsTrackRe();
-    [GeneratedRegex(@"lyricsContainer.*?<xmp[^>]*>(.*?)</xmp>", RegexOptions.Singleline)]
-    private static partial Regex BugsLyricsRe();
-    [GeneratedRegex(@"<xmp[^>]*>(.*?)</xmp>", RegexOptions.Singleline)]
-    private static partial Regex BugsXmpRe();
-    [GeneratedRegex(@"<meta\s+property=""og:title""\s+content=""([^""]*)""", RegexOptions.IgnoreCase)]
-    private static partial Regex BugsOgTitleRe();
-    [GeneratedRegex(@"<br\s*/?>", RegexOptions.IgnoreCase)]
-    private static partial Regex BrRe();
-    [GeneratedRegex(@"^paroles de la chanson.*?\n", RegexOptions.IgnoreCase)]
-    private static partial Regex OvhHeaderRe();
 
     /// <summary>
     /// (곡, 아티스트) 후보. <b>유튜브가 준 구조화 메타(music)가 있으면 그게 1순위</b>이고, 제목 문자열

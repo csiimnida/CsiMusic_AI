@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace CsiMusic.Web.Services;
 
 /// <summary>
-/// 유튜브 영상 제목에서 <b>곡 제목 / 아티스트</b> 후보를 뽑는다. 가사 검색(LRCLIB·NetEase·Bugs)의 입력.
+/// 유튜브 영상 제목에서 <b>곡 제목 / 아티스트</b> 후보를 뽑는다. 가사 검색(LRCLIB·Unison)의 입력.
 ///
 /// 왜 별도 클래스인가: 여기가 가사 검색 품질의 절반을 결정하는데 순수 문자열 처리라 네트워크·DB 없이
 /// 단독 검증이 가능하다. LyricsService 안에 있으면 테스트할 방법이 없어 밖으로 뺐다.

@@ -95,7 +95,7 @@ public sealed class AiLyricsVerifier(
     };
 
     /// <summary>검증 대상 후보의 신원 — 소스가 스스로 주장하는 곡/아티스트/길이.</summary>
-    /// <param name="Source">lrclib · unison · netease · bugs · lyricsovh 등.</param>
+    /// <param name="Source">lrclib · unison · namu 등.</param>
     public sealed record Candidate(
         string Source, string? Track, string? Artist, double? Duration, string Lyrics);
 

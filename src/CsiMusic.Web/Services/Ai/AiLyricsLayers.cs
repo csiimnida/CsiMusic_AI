@@ -318,12 +318,12 @@ public sealed class AiLyricsLayers(
         var want = layer == Layer.Pronunciation
             ? """
               You are copying the PRONUNCIATION line: the hangul that spells out how the Japanese
-              SOUNDS. It reads like the Japanese when spoken aloud (돗토 사가시테탄다요), and it does
+              SOUNDS. It reads like the Japanese when spoken aloud (키미노 코에가 키코에루), and it does
               not make sense as a Korean sentence.
               """
             : """
               You are copying the TRANSLATION line: the hangul that gives the MEANING in natural
-              Korean (계속 찾고 있었어). It reads as an ordinary Korean sentence and does not sound
+              Korean (네 목소리가 들려). It reads as an ordinary Korean sentence and does not sound
               like the Japanese.
               """;
 
@@ -366,7 +366,7 @@ public sealed class AiLyricsLayers(
     ///
     /// 다른 것은 <b>걸렸을 때 버리는 단위</b>다. 생성은 우리가 만든 값이라 하나라도 틀리면 그
     /// 덩어리를 통째로 버린다. 베껴 오는 경우는 사람이 쓴 원본에 영어가 섞여 있는 일이 흔해서
-    /// (`오카시쿠앗테 와랏타(Fu Fu！)`) 통째로 버리면 멀쩡한 열네 줄까지 같이 날아간다.
+    /// (`아리가토오(Thank you)`) 통째로 버리면 멀쩡한 열네 줄까지 같이 날아간다.
     /// 그래서 <b>걸린 줄만 비우고</b> 나머지는 살린다 — 빈 자리는 AI 생성이 메운다(§9.5).
     ///
     /// 다만 여러 줄이 한꺼번에 걸리는 건 '영어가 섞였다'가 아니라 <b>줄이 밀렸다</b>는 뜻이다.
